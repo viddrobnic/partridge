@@ -111,44 +111,61 @@ impl Solution {
     }
 }
 
-fn solve(
-    board: &mut Board,
-    free_cards: &mut [u8; SIZE],
-    solution: &mut Solution,
-    nr_solutions: &mut u32,
-    x: u8,
-    y: u8,
-) {
-    let mut increased = false;
-    for card_idx in 0..SIZE {
-        if free_cards[card_idx] == 0 {
-            continue;
+struct Solver {
+    board: Board,
+    free_cards: [u8; SIZE],
+    solution: Solution,
+    nr_solutions: u32,
+}
+
+impl Solver {
+    fn new() -> Self {
+        let mut free_cards = [0u8; SIZE];
+        for (card_idx, left) in free_cards.iter_mut().enumerate() {
+            *left = card_idx as u8 + 1;
         }
 
-        let card = (card_idx + 1) as u8;
-        if !board.can_place(card, x, y) {
-            continue;
+        Self {
+            free_cards,
+            board: Board::new(),
+            solution: Solution::default(),
+            nr_solutions: 0,
         }
-
-        solution.push(card);
-        free_cards[card_idx] -= 1;
-        board.place(card, x, y);
-
-        match board.find_empty(y) {
-            Some((new_x, new_y)) => solve(board, free_cards, solution, nr_solutions, new_x, new_y),
-            None => {
-                *nr_solutions += 1;
-                increased = true;
-            }
-        };
-
-        solution.pop();
-        free_cards[card_idx] += 1;
-        board.remove(card, x, y);
     }
 
-    if increased && *nr_solutions % 10 == 0 {
-        println!("{nr_solutions}");
+    fn solve(&mut self, x: u8, y: u8) {
+        let mut increased = false;
+        for card_idx in 0..SIZE {
+            if self.free_cards[card_idx] == 0 {
+                continue;
+            }
+
+            let card = (card_idx + 1) as u8;
+            if !self.board.can_place(card, x, y) {
+                continue;
+            }
+
+            self.solution.push(card);
+            self.free_cards[card_idx] -= 1;
+            self.board.place(card, x, y);
+
+            match self.board.find_empty(y) {
+                Some((new_x, new_y)) => self.solve(new_x, new_y),
+                None => {
+                    self.nr_solutions += 1;
+                    println!("{:?}", self.solution.steps);
+                    increased = true;
+                }
+            };
+
+            self.solution.pop();
+            self.free_cards[card_idx] += 1;
+            self.board.remove(card, x, y);
+        }
+
+        if increased && self.nr_solutions % 10 == 0 {
+            println!("{}", self.nr_solutions);
+        }
     }
 }
 
@@ -158,19 +175,10 @@ fn main() {
         *left = card_idx as u8 + 1;
     }
 
-    let mut board = Board::new();
-    let mut solution = Solution::default();
-    let mut nr_solutions = 0;
-    solve(
-        &mut board,
-        &mut free_cards,
-        &mut solution,
-        &mut nr_solutions,
-        0,
-        0,
-    );
+    let mut solver = Solver::new();
+    solver.solve(0, 0);
 
-    println!("finished: {nr_solutions}");
+    println!("finished: {}", solver.nr_solutions);
 }
 
 #[cfg(test)]
