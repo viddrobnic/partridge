@@ -1,3 +1,13 @@
+use std::{
+    fs,
+    io::{BufWriter, Write},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU8, Ordering},
+    },
+    thread,
+};
+
 const SIZE: usize = 9;
 const BOARD_SIZE: usize = (SIZE * (SIZE + 1)) / 2;
 
@@ -32,6 +42,7 @@ impl Row {
     }
 }
 
+#[derive(Clone)]
 struct Board([Row; BOARD_SIZE]);
 
 impl Board {
@@ -86,12 +97,15 @@ impl Board {
     }
 }
 
-struct Solution {
-    steps: [u8; BOARD_SIZE],
+type Solution = [u8; BOARD_SIZE];
+
+#[derive(Clone)]
+struct SolutionBuilder {
+    steps: Solution,
     length: usize,
 }
 
-impl Default for Solution {
+impl Default for SolutionBuilder {
     fn default() -> Self {
         Self {
             steps: [0; BOARD_SIZE],
@@ -100,7 +114,7 @@ impl Default for Solution {
     }
 }
 
-impl Solution {
+impl SolutionBuilder {
     fn push(&mut self, card: u8) {
         self.steps[self.length] = card;
         self.length += 1;
@@ -111,15 +125,21 @@ impl Solution {
     }
 }
 
+#[derive(Clone)]
 struct Solver {
     board: Board,
     free_cards: [u8; SIZE],
-    solution: Solution,
-    nr_solutions: u32,
+    solution: SolutionBuilder,
+
+    depth: u8,
+    max_threads: u8,
+    nr_threads: Arc<AtomicU8>,
+
+    solutions: Arc<Mutex<Vec<Solution>>>,
 }
 
 impl Solver {
-    fn new() -> Self {
+    fn new(max_threads: u8) -> Self {
         let mut free_cards = [0u8; SIZE];
         for (card_idx, left) in free_cards.iter_mut().enumerate() {
             *left = card_idx as u8 + 1;
@@ -128,13 +148,15 @@ impl Solver {
         Self {
             free_cards,
             board: Board::new(),
-            solution: Solution::default(),
-            nr_solutions: 0,
+            solution: SolutionBuilder::default(),
+            depth: 0,
+            max_threads,
+            nr_threads: Arc::new(AtomicU8::new(1)),
+            solutions: Default::default(),
         }
     }
 
     fn solve(&mut self, x: u8, y: u8) {
-        let mut increased = false;
         for card_idx in 0..SIZE {
             if self.free_cards[card_idx] == 0 {
                 continue;
@@ -148,37 +170,66 @@ impl Solver {
             self.solution.push(card);
             self.free_cards[card_idx] -= 1;
             self.board.place(card, x, y);
+            self.depth += 1;
 
             match self.board.find_empty(y) {
-                Some((new_x, new_y)) => self.solve(new_x, new_y),
                 None => {
-                    self.nr_solutions += 1;
-                    println!("{:?}", self.solution.steps);
-                    increased = true;
+                    self.add_solution(self.solution.steps);
+                }
+                Some((new_x, new_y)) => {
+                    if self.should_parallelise() {
+                        self.nr_threads.fetch_add(1, Ordering::Relaxed);
+                        let mut solver = self.clone();
+
+                        thread::spawn(move || {
+                            solver.solve(new_x, new_y);
+                            solver.nr_threads.fetch_sub(1, Ordering::Relaxed);
+                        });
+                    } else {
+                        self.solve(new_x, new_y);
+                    }
                 }
             };
 
             self.solution.pop();
             self.free_cards[card_idx] += 1;
             self.board.remove(card, x, y);
+            self.depth -= 1;
         }
+    }
 
-        if increased && self.nr_solutions % 10 == 0 {
-            println!("{}", self.nr_solutions);
+    fn add_solution(&self, solution: Solution) {
+        let mut sols = self.solutions.lock().unwrap();
+        sols.push(solution);
+
+        if sols.len() % 10 == 0 {
+            println!("progress: {}", sols.len());
         }
+    }
+
+    #[inline]
+    fn should_parallelise(&self) -> bool {
+        self.depth < 20 && self.nr_threads.load(Ordering::Relaxed) < self.max_threads
     }
 }
 
 fn main() {
-    let mut free_cards = [0u8; SIZE];
-    for (card_idx, left) in free_cards.iter_mut().enumerate() {
-        *left = card_idx as u8 + 1;
-    }
+    let threads = thread::available_parallelism().unwrap().get() as u8;
+    println!("running on {threads} threads!");
 
-    let mut solver = Solver::new();
+    let mut solver = Solver::new(threads);
     solver.solve(0, 0);
 
-    println!("finished: {}", solver.nr_solutions);
+    let solutions = solver.solutions.lock().unwrap();
+    let f = fs::File::create("solutions.txt").unwrap();
+    let mut w = BufWriter::new(f);
+
+    for sol in solutions.iter() {
+        for c in sol {
+            _ = write!(&mut w, "{} ", c);
+        }
+        _ = writeln!(&mut w);
+    }
 }
 
 #[cfg(test)]
