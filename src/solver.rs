@@ -114,6 +114,6 @@ impl Solver {
 
     #[inline]
     fn should_parallelise(&self) -> bool {
-        self.depth < 20 && self.nr_threads.load(Ordering::Relaxed) < self.max_threads
+        self.depth < 10 && self.nr_threads.load(Ordering::Relaxed) < self.max_threads
     }
 }
