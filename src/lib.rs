@@ -1,3 +1,4 @@
+pub mod render;
 pub mod solver;
 
 pub const SIZE: usize = 9;
@@ -92,6 +93,11 @@ impl Board {
 }
 
 pub type Solution = [u8; BOARD_SIZE];
+
+pub fn solution_from_str(line: &str) -> Solution {
+    let mut iter = line.trim().split(' ').map(|s| s.parse::<u8>().unwrap());
+    std::array::from_fn(|_| iter.next().unwrap())
+}
 
 #[cfg(test)]
 mod test {
